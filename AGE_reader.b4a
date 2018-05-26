@@ -1,0 +1,487 @@
+﻿Version=5.02
+NumberOfModules=2
+Module1=CameraExClass
+Module2=StateManager
+Build1=Default,oico.age1
+ManifestCode='This code will be applied to the manifest file during compilation.~\n~'You do not need to modify it in most cases.~\n~'See this link for for more information: http://www.b4x.com/forum/showthread.php?p=78136~\n~AddManifestText(~\n~<uses-sdk android:minSdkVersion="21" android:targetSdkVersion="21"/>~\n~<uses-feature android:name="android.hardware.usb.accessory"/>~\n~<supports-screens android:largeScreens="true" ~\n~    android:normalScreens="true" ~\n~    android:smallScreens="true" ~\n~    android:anyDensity="true"/>)~\n~SetApplicationAttribute(android:icon, "@drawable/icon")~\n~SetApplicationAttribute(android:label, "$LABEL$")~\n~SetApplicationAttribute(android:theme, "@android:style/Theme.Holo")~\n~SetApplicationAttribute(android:largeHeap,"true")~\n~'End of default text.~\n~AddActivityText(main, <intent-filter android:label="AGE Reader">~\n~        <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />~\n~    </intent-filter>~\n~   <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"~\n~        android:resource="@xml/device_filter" />) 'is there a way to put in the name to display in the OS selection list?
+IconFile=
+NumberOfFiles=6
+File1=allinone.bal
+File2=allinone_no_neo.bal
+File3=allinone_no_neo_doogee.bal
+File4=StateManager.bas
+File5=z.png
+File6=z_doogee.png
+NumberOfLibraries=11
+Library1=core
+Library2=camera
+Library3=reflection
+Library4=phone
+Library5=dateutils
+Library6=felusbserial
+Library7=usb
+Library8=mfimage
+Library9=javaobject
+Library10=mflib
+Library11=randomaccessfile
+@EndOfDesignText@
+#Region  Project Attributes 
+	#ApplicationLabel: AGE Reader
+	#VersionCode: 1
+	#VersionName: 
+	'SupportedOrientations possible values: unspecified, landscape or portrait.
+	#SupportedOrientations: portrait
+	#CanInstallToExternalStorage: False
+#End Region
+
+#Region  Activity Attributes 
+	#FullScreen: True
+	#IncludeTitle: False
+#End Region
+
+Sub Process_Globals
+	'These global variables will be declared once when the application starts.
+	'These variables can be accessed from all modules.
+	Private frontCamera As Boolean = False
+	Private usbserial As felUsbSerial
+    Private manager As UsbManager
+	'only if using a delay timer
+	'timers for disabling the camera after picture taken
+	Dim DisableCameraTimer As Timer
+	Dim TakePicTimer As Timer
+	Dim MFEffect As MF_Image
+End Sub
+
+Sub Globals
+	'These global variables will be redeclared each time the activity is created.
+	'These variables can only be accessed from this module.
+
+	Private FirstName As Label
+	Private FirstNameT As EditText
+	Private id As Label
+	Private IDT As EditText
+	Private lefteye As RadioButton
+	Private Panel1 As Panel
+	Private Righteye As RadioButton
+	Private eyeSelection As String
+	Private Surname As Label
+	Private SurnameT As EditText
+	Private Panel2 As Panel
+	Private camEx As CameraExClass
+	Private IRledOff As String
+	Private IRledOn As String
+	Private BlueledOn As String
+	Private TakeSequence As String
+	Private TransistorRead As String
+	Private NeoPixel As String
+	Private btnTakePicture As Button
+	Private mode_select As String
+	Dim awake As PhoneWakeState
+	Dim pid As PhoneId
+	Dim PatientAgeT As Int
+End Sub
+
+Sub Activity_Create(FirstTime As Boolean)
+	Activity.LoadLayout("allinone_no_neo") 'for UI without neopixel for asus
+'	Activity.LoadLayout("allinone_no_neo_doogee") 'for UI without neopixel on doogee f5, with chinese UI
+'    Activity.LoadLayout("allinone") 'for UI with neopixel
+	
+'	Log(pid.GetDeviceId)
+'353384072582845
+'	If (pid.GetDeviceId="353384072310361") Then
+'		ToastMessageShow("ok",False)
+'	Else
+'		ToastMessageShow("Piracy is bad. contact oico.co.uk",False)
+'		ExitApplication
+'	End If
+
+	Dim Tr As Int
+	Dim lst1 As List
+	lst1.Initialize
+	lst1.AddAll(Array As String("356449070260798","356449071005515","356449070261556","356449070228696","356449070261499","356449070288559","356449070262497","351870082298507"))
+	Dim txt1 As String = pid.GetDeviceId
+	If lst1.IndexOf(txt1) = -1 Then
+		Tr = StateManager.GetSetting2("timesrun",0)
+		If Tr < 100 Then
+			Tr = Tr + 1
+			StateManager.SetSetting("timesrun",Tr)
+			StateManager.SaveSettings
+		Else
+			ExitApplication
+		End If
+	Else
+		ToastMessageShow("ok",False)
+	End If
+
+
+	   	'initialise the IR red off function
+	IRledOn = "0" 'turn on IR fixation
+	IRledOff = "3" 'turn off all LEDs
+	TakeSequence = "2" 'to turn off IR, turn on Blue and take reading from phototransistor
+	BlueledOn = "1" ' to turn on blued LED and switch off IR
+	TransistorRead = "4" 'just take a reading from the phototransistor and display on screen
+	'mode select for camera mode toggle between IR, Colour and Enhanced
+	'I is IR, C is colour and E is enhanced
+	mode_select = "C"
+	   
+	   'for arduino felusb serial library. connect to arduino on startup of app
+	   If FirstTime Then
+	manager.Initialize
+	 arduino_start
+      End If
+	  
+	   'initialise the disabling for camera timer for 5 seconds to give time to process image taken.
+	DisableCameraTimer.Initialize("DisableCameraTimer1",100)
+'	TakePicTimer.Initialize("pictimer",300)
+	awake.KeepAlive(True)
+	
+End Sub
+
+Sub arduino_start
+	 Dim device As UsbDevice = manager.GetDevices(0) 'assuming that there is exactly one device
+     If manager.HasPermission(device) = False Then
+       ToastMessageShow("Please allow connection and click again.", True)
+       manager.RequestPermission(device)
+	   'initialise the disabling for camera timer for 5 seconds to give time to process image taken.
+	   DisableCameraTimer.Initialize("DisableCameraTimer1",300)
+	   usbserial.Initialize("serial", device, -1)
+       usbserial.BaudRate = 9600
+       usbserial.DataBits = usbserial.DATA_BITS_8
+	   usbserial.Write(IRledOn.GetBytes("UTF8"))
+     Else
+       usbserial.Initialize("serial", device, -1)
+       usbserial.BaudRate = 9600
+       usbserial.DataBits = usbserial.DATA_BITS_8
+	   DisableCameraTimer.Initialize("DisableCameraTimer1",300)
+	   usbserial.Write(IRledOn.GetBytes("UTF8"))
+     End If
+	 usbserial.Write(IRledOn.GetBytes("UTF8"))
+
+End Sub
+
+
+'add bluetooth button to trigger camera
+Sub Activity_KeyPress (KeyCode As Int) As Boolean 'Return True to consume the event
+   If KeyCode = KeyCodes.KEYCODE_VOLUME_UP Or  KeyCodes.KEYCODE_VOLUME_DOWN Then
+   btnTakePicture_Click
+         Return True
+	Else if KeyCodes.KEYCODE_TAB Then
+		Return True
+   End If
+End Sub
+
+
+Sub Activity_Resume
+	InitializeCamera
+	manager.Initialize
+	arduino_start
+'	usbserial.Write(IRledOn.GetBytes("UTF8"))
+	awake.KeepAlive(True)
+End Sub
+
+Private Sub InitializeCamera
+	camEx.Initialize(Panel2, frontCamera, Me, "Camera1")
+'	DisableCameraTimer.Enabled=True
+	frontCamera = camEx.Front
+End Sub
+
+Sub Activity_Pause (UserClosed As Boolean)
+    usbserial.Write(IRledOff.GetBytes("UTF8"))
+	camEx.CloseNow
+	usbserial.Close
+	awake.ReleaseKeepAlive
+End Sub
+
+
+Sub Camera1_Ready (Success As Boolean)
+	If Success Then
+		camEx.SetJpegQuality(90)
+		camEx.SetColorEffect("mono") 'usually set to mono, but for moto not
+		camEx.setFlashMode("off")
+		camEx.SetFocusMode("manual") 'prev infinity
+		camEx.WhiteBalance="incandescent" 'incandescent for asus. auto no good. incandescent for doogee
+	    camEx.setExposureCompensation(-2) '2 for asus. 12 to -12 for asus. -2 for doogee. -3 to 3 for doogee. -12 to 12 for G5.
+'for all cameras below 
+		camEx.CommitParameters
+		camEx.StartPreview
+		Camera_LogFeatures
+		
+		 usbserial.Write(IRledOn.GetBytes("UTF8"))
+	Else
+		ToastMessageShow("Cannot open camera.", True)
+	End If
+End Sub
+
+Sub btnTakePicture_Click
+	If mode_select = "I" Then
+		camEx.TakePicture
+	Else
+'		TakePicTimer.Initialize("pictimer",300)
+		usbserial.Write(TakeSequence.GetBytes("UTF8")) 'for asus, doogee etc
+		usbserial.StartReading
+'		TakePicTimer.Enabled=True
+	End If
+	btnTakePicture.Enabled = False
+End Sub
+
+
+Sub DisableCameraTimer1_Tick
+	DisableCameraTimer.Enabled=False
+	ProgressDialogHide
+'	camEx.TakePicture
+	PicTake
+End Sub
+
+Sub pictimer_Tick
+	TakePicTimer.Enabled=False
+	PicTake
+End Sub
+
+Sub PicTake
+	camEx.TakePicture
+	btnTakePicture.Enabled = False
+End Sub
+
+Sub Camera1_PictureTaken (Data() As Byte)
+	Dim timenow As String = DateTime.GetDayOfYear(DateTime.Now) & DateTime.GetMinute(DateTime.Now) & DateTime.GetSecond(DateTime.Now)
+	Dim filename As String = IDT.Text & SurnameT.Text & FirstNameT.Text & eyeSelection & timenow  & ".jpg"
+	Dim dir As String = File.DirRootExternal
+	camEx.SavePictureToFile(Data, dir, filename)
+	'send a broadcast intent to the media scanner to force it to scan the saved file.
+	Dim Phone As Phone
+	Dim i As Intent
+	i.Initialize("android.intent.action.MEDIA_SCANNER_SCAN_FILE", _
+		"file://" & File.Combine(dir, filename))
+	Phone.SendBroadcastIntent(i)
+	ToastMessageShow("Picture saved." & CRLF  & "File size: " & File.Size(dir, filename), True)
+	
+	'create the black circle mask around image 
+	Dim img1 As Bitmap
+	Dim result1 As Boolean
+	img1=MFEffect.LoadBitmapWithOverlay(dir,filename,File.DirAssets,"z_doogee.png",True) 'z.png for asus. z_doogee.png for doogee
+	result1= MFEffect.SaveBitmap(img1,dir,filename,100)
+	i.Initialize("android.intent.action.MEDIA_SCANNER_SCAN_FILE", _
+	"file://" & File.Combine(dir, filename))
+	Phone.SendBroadcastIntent(i)
+	
+	'create bitmap and initialise it as mutable with 3x the screen resolution.
+	Dim imageV As Bitmap 
+	imageV.InitializeMutable(1510dip,1700dip)
+	'create the canvas and initialise it with the mutable image above
+	Dim imageCanvas As Canvas
+	imageCanvas.Initialize2(imageV)
+	'create the required destination rectangle and initialise with 0 offsets at all sides
+	Dim destrect As Rect
+	destrect.Initialize(0dip,0dip,1510dip,1700dip)
+	
+	'draw the main image onto the canvas
+	imageCanvas.DrawBitmap(LoadBitmap(dir,filename),Null,destrect)
+	'create the string for the text overlay
+    Dim t As String = "Eye: " & eyeSelection & CRLF & "ID: " & IDT.Text
+    'write the text for the overlay onto the canvas
+    imageCanvas.DrawText(t ,300dip, 80dip, Typeface.DEFAULT_BOLD ,40,Colors.White ,"CENTER")
+	Dim t2 As String = "Name: " & SurnameT.Text & FirstNameT.Text
+	imageCanvas.DrawText(t2 ,300dip, 150dip, Typeface.DEFAULT_BOLD ,40,Colors.White ,"CENTER")
+	'write the file back to the original filename
+    Dim OUT As OutputStream
+    OUT = File.OpenOutput(dir, filename, False)
+    imageCanvas.Bitmap.WriteToStream( OUT,100,"JPEG")
+    OUT.Close
+	camEx.StartPreview 'restart preview
+	btnTakePicture.Enabled = True
+	'edit the output image by improving sharpness and brightness etc...
+	'output image to a new file called "enhanced"
+	If mode_select = "E" Then
+		Dim OUT2 As OutputStream
+		Dim filename2 As String = IDT.Text & SurnameT.Text & FirstNameT.Text & eyeSelection & timenow  & "enhanced.jpg"
+'		Dim result2 As Boolean
+    	OUT2 = File.OpenOutput(dir, filename2, False)
+		Dim editedbmp As Bitmap
+		editedbmp=MFEffect.LoadBitmap(dir,filename)
+		editedbmp=MFEffect.EffectBrightness(editedbmp,0.2)
+		editedbmp=MFEffect.EffectSaturation(editedbmp,0.6)
+		editedbmp=MFEffect.EffectContrast(editedbmp,-0.2)
+		editedbmp=MFEffect.EffectHue(editedbmp,359)
+		editedbmp.WriteToStream(OUT2,100,"JPEG")
+		ToastMessageShow("Enhanced Image Generated",True)
+		OUT2.Close
+		i.Initialize("android.intent.action.MEDIA_SCANNER_SCAN_FILE", _
+			"file://" & File.Combine(dir, filename2))
+		Phone.SendBroadcastIntent(i)
+	Else
+		
+	End If
+End Sub
+
+
+'left right eye selection
+Sub lefteye_CheckedChange(Checked As Boolean)
+	eyeSelection = "LEFT"
+End Sub
+
+Sub Righteye_CheckedChange(Checked As Boolean)
+	eyeSelection = "RIGHT"
+End Sub
+
+'Neopixel control below
+
+Sub rb1_CheckedChange(Checked As Boolean)
+	NeoPixel = "a"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))
+End Sub
+
+Sub rb2_CheckedChange(Checked As Boolean)
+	NeoPixel = "b"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))
+End Sub
+
+Sub rb3_CheckedChange(Checked As Boolean)	
+    NeoPixel = "c"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))
+End Sub
+
+Sub rb4_CheckedChange(Checked As Boolean)
+	NeoPixel = "d"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))
+End Sub
+
+Sub rb5_CheckedChange(Checked As Boolean)
+    NeoPixel = "e"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb6_CheckedChange(Checked As Boolean)
+    NeoPixel = "f"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb7_CheckedChange(Checked As Boolean)
+    NeoPixel = "g"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb8_CheckedChange(Checked As Boolean)
+    NeoPixel = "h"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb9_CheckedChange(Checked As Boolean)
+    NeoPixel = "i"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb10_CheckedChange(Checked As Boolean)
+    NeoPixel = "j"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb11_CheckedChange(Checked As Boolean)
+    NeoPixel = "k"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb12_CheckedChange(Checked As Boolean)
+    NeoPixel = "l"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+Sub rb_off_CheckedChange(Checked As Boolean)
+    NeoPixel = "m"
+	usbserial.Write(NeoPixel.GetBytes("UTF8"))	
+End Sub
+
+
+
+Sub ir_radio_CheckedChange(Checked As Boolean)
+	camEx.StopPreview
+	camEx.SetColorEffect("mono") 'usually set to mono
+	camEx.CommitParameters
+	camEx.StartPreview
+	mode_select= "I"
+End Sub
+Sub enh_radio_CheckedChange(Checked As Boolean)
+	camEx.StopPreview
+	camEx.SetColorEffect("mono")
+	camEx.CommitParameters
+	camEx.StartPreview
+	mode_select="E"
+End Sub
+Sub col_radio_CheckedChange(Checked As Boolean)
+	camEx.StopPreview
+	camEx.SetColorEffect("mono")
+	camEx.CommitParameters
+	camEx.StartPreview
+	mode_select="C"
+End Sub
+
+
+
+Sub PatientAge_TextChanged (Old As String, New As String)
+	PatientAgeT = New
+	ToastMessageShow(PatientAgeT,True)
+End Sub
+
+
+Sub Transistor_Click
+	usbserial.Write(TransistorRead.GetBytes("UTF8"))
+	usbserial.StartReading
+End Sub
+
+Sub serial_DataAvailable (Buffer() As Byte)
+    Dim msg As String
+    msg = BytesToString(Buffer, 0, Buffer.Length, "UTF8")
+    ToastMessageShow(msg,True)
+	usbserial.Close
+	arduino_start
+End Sub
+
+'random stuff below
+
+Sub Camera_LogFeatures
+	Log("Picture sizes________")
+	Dim pictureSizes() As CameraSize = camEx.GetSupportedPicturesSizes
+	For i = 0 To pictureSizes.Length - 1
+		Log(TAB & pictureSizes(i).Width & "x" & pictureSizes(i).Height)
+	Next
+	Log("Flash modes________")
+	Dim flashModesList As List = camEx.GetSupportedFlashModes
+	If flashModesList.IsInitialized = False Then
+		Log(TAB & "Not supported.")
+	Else
+		Dim flash As String
+		For i=0 To flashModesList.Size-1
+			flash=flashModesList.Get(i) : Log(TAB & flash)
+		Next
+	End If
+	Log("Focus modes________")
+	Dim focusModesList As List = camEx.GetSupportedFocusModes
+	If focusModesList.IsInitialized = False Then
+		Log(TAB & "Not supported.")
+	Else
+		Dim focus As String
+		For i=0 To focusModesList.Size-1
+			focus=focusModesList.Get(i) : Log(TAB & focus)
+		Next
+	End If
+	Log("Colour effects________")
+	Dim effectsList As List = camEx.GetSupportedColorEffects
+	If effectsList.IsInitialized = False Then
+		Log(TAB & "Not supported.")
+	Else
+		Dim effect As String
+		For i=0 To effectsList.Size-1
+			effect=effectsList.Get(i) : Log(TAB & effect)
+		Next
+	End If
+	Log("Max zoom________")
+	Log(TAB & camEx.GetMaxZoom)
+	
+	Dim ExComp As Int = camEx.GetExposureCompensation
+	Log(TAB & "Expo compensation : " & ExComp)
+	Dim ExCompMin As Int = camEx.GetMinExposureCompensation
+	Log(TAB & "Expo compensation min : " & ExCompMin)
+	Dim ExCompMax As Int = camEx.GetMaxExposureCompensation
+	Log(TAB & "Expo compensation Max : " & ExCompMax)
+	
+End Sub
+
